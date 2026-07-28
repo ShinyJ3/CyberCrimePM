@@ -1,35 +1,22 @@
-"""
-preprocess.py
 
-Cleans and prepares the Global Cybersecurity Threats (2015-2024) dataset
-for the "Fast vs. Slow Resolution" classification task (Option C).
-
-Input : data/raw/cybersecurity_threats.csv   (raw Kaggle download)
-Output: data/processed/cyber_processed.csv   (clean, encoded, ready for modeling)
-
-NOTE ON SOURCES: this file uses standard pandas cleaning operations
-(dropna, drop_duplicates, get_dummies) rather than techniques from a
-specific tutorial, so there's nothing to cite beyond pandas' own docs:
-https://pandas.pydata.org/docs/reference/api/pandas.get_dummies.html
-The median-split approach for turning a continuous value into a Fast/Slow
-label is a standard binning technique, not from any single source.
-
-Run from the project root:
-    python src/preprocess.py
-"""
+# This file is used to clean and preprocess the raw Kaggle dataset for the Fast vs. Slow Resolution classification task.
+# The input is the raw CSV file downloaded from Kaggle, and the output is a cleaned and encoded CSV file ready for modeling.
+# The approach used for creating the Fast/Slow label is a median split, which is a standard binning technique.
 
 import pandas as pd
 from pathlib import Path
 
-# ---------------------------------------------------------
-# 1. CONFIG — paths and column decisions live here so the
-#    rest of the pipeline doesn't need to be touched later.
-# ---------------------------------------------------------
 
+# For this file, I used pandas' built-in functions for cleaning and encoding, so no additional libraries are need
+# Citation: https://pandas.pydata.org/docs/reference/api/pandas.get_dummies.html
+
+# I found this approach of importing the data and assigning it to these special Path variables to be more 
+# useful than regular string paths, as it allows for easier path manipulation and is more robust across different operating systems
+# according to my research, so this is the Kaggle dataset file that will be used for the rest of the project
 RAW_PATH = Path("data/raw/cybersecurity_threats.csv")
 PROCESSED_PATH = Path("data/processed/cyber_processed.csv")
 
-# Columns used as predictors (features)
+# Features that will be used as predictors for the classification task
 FEATURE_COLUMNS = [
     "attack_type",
     "target_industry",
@@ -39,52 +26,34 @@ FEATURE_COLUMNS = [
     "country",
 ]
 
-# Column we will bucket into the classification target
+# This is the new column that will be created to represent the target variable for the classification task
 RESOLUTION_TIME_COLUMN = "incident_resolution_time_in_hours"
 
-# Columns we intentionally EXCLUDE as predictors (per the plan:
-# keeping financial loss / affected users out avoids them
-# overshadowing the defense-mechanism signal we actually care about)
+# Columns that will be excluded from the final dataset, as they are not relevant for the classification task
 EXCLUDED_COLUMNS = ["financial_loss_in_million", "number_of_affected_users", "year"]
 
 
-# ---------------------------------------------------------
-# 2. LOAD
-# ---------------------------------------------------------
-
+# Functions are used for this file instead of notebooks and cells as it makes it easier on me to just call 
+# functions in the main() pipeline, and also makes it easier to test each function individually.
 def load_raw_data(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Couldn't find raw data at {path}. "
-            "Download the CSV from Kaggle and place it there."
-        )
     df = pd.read_csv(path)
     print(f"Loaded raw data: {df.shape[0]} rows, {df.shape[1]} columns")
     return df
 
-
-# ---------------------------------------------------------
-# 3. CLEAN COLUMN NAMES
-#    Kaggle CSVs often have spaces/parentheses in headers,
-#    e.g. "Incident Resolution Time (in Hours)".
-#    Standardizing to snake_case avoids bugs down the line.
-# ---------------------------------------------------------
-
+# Columns cleaned using RegEx and string methods to remove whitespace, special characters, and convert to lowercase. 
+# This is important for consistency and to avoid issues with column names during processing.
 def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = (
         df.columns.str.strip()
         .str.lower()
-        .str.replace(r"[^\w\s]", "", regex=True)   # drop punctuation like ( ) $
-        .str.replace(r"\s+", "_", regex=True)      # spaces -> underscores
+        .str.replace(r"[^\w\s]", "", regex=True)   
+        .str.replace(r"\s+", "_", regex=True)      
     )
     return df
 
 
-# ---------------------------------------------------------
-# 4. MISSING VALUES & DUPLICATES
-# ---------------------------------------------------------
-
+# Drops missing/null values, but there were none in the dataset, so this is just a precautionary step.
 def report_missing_values(df: pd.DataFrame) -> None:
     missing = df.isnull().sum()
     missing = missing[missing > 0]
@@ -94,7 +63,8 @@ def report_missing_values(df: pd.DataFrame) -> None:
         print("Missing values by column:")
         print(missing)
 
-
+# Drops the duplicate values in the dataset, and since before did equal after, there were no duplicates in the dataset, 
+# so this is just a precautionary step.
 def drop_duplicates(df: pd.DataFrame) -> pd.DataFrame:
     before = len(df)
     df = df.drop_duplicates()
@@ -103,15 +73,13 @@ def drop_duplicates(df: pd.DataFrame) -> pd.DataFrame:
         print(f"Dropped {before - after} duplicate rows.")
     return df
 
-
+# Function to handle the values that are null and dropped, but since there were none, this is again just a 
+# precautionary step. 
 def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    # Categorical predictors: fill with "Unknown" rather than dropping rows
     for col in FEATURE_COLUMNS:
         if col in df.columns and df[col].isnull().any():
             df[col] = df[col].fillna("Unknown")
-
-    # Rows missing the target itself can't be used for training
     if RESOLUTION_TIME_COLUMN in df.columns:
         before = len(df)
         df = df.dropna(subset=[RESOLUTION_TIME_COLUMN])
@@ -121,12 +89,8 @@ def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ---------------------------------------------------------
-# 5. CREATE THE TARGET VARIABLE
-#    Median split: Fast = below median resolution time,
-#    Slow = at/above median. Guarantees roughly balanced classes.
-# ---------------------------------------------------------
-
+# Here we create our target variable for the classification task, which is a binary label indicating whether the 
+# resolution time is above or below the median.
 def create_resolution_target(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     median_time = df[RESOLUTION_TIME_COLUMN].median()
@@ -140,25 +104,23 @@ def create_resolution_target(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ---------------------------------------------------------
-# 6. ENCODE CATEGORICAL FEATURES
-# ---------------------------------------------------------
-
+# This function essentially encodes the categorical features into a format that can be used by machine learning models, 
+# which is one-hot encoding in this case.
 def encode_features(df: pd.DataFrame) -> pd.DataFrame:
     existing_features = [c for c in FEATURE_COLUMNS if c in df.columns]
     missing_features = [c for c in FEATURE_COLUMNS if c not in df.columns]
     if missing_features:
         print(f"Warning: expected columns not found and will be skipped: {missing_features}")
 
+    # These lines of code use pandas' get_dummies function to perform one-hot encoding on the categorical features, 
+    # and then concatenate the encoded features with the target variable into a new DataFrame.
     encoded = pd.get_dummies(df[existing_features], drop_first=False)
     result = pd.concat([encoded, df["resolution_class"]], axis=1)
     return result
 
 
-# ---------------------------------------------------------
-# 7. MAIN PIPELINE
-# ---------------------------------------------------------
-
+# The pipeline that runs all the functions and prints out their functions, cleaning the entire dataset and 
+# preparing it for modeling. The final processed dataset is saved to a CSV file which is stored in the data folder
 def main():
     df = load_raw_data(RAW_PATH)
     df = clean_column_names(df)
@@ -176,6 +138,6 @@ def main():
     final_df.to_csv(PROCESSED_PATH, index=False)
     print(f"\nSaved processed data to {PROCESSED_PATH} ({final_df.shape[0]} rows, {final_df.shape[1]} columns)")
 
-
+# Used for testing the functions in this file, and also allows for the script to be run as a standalone program.
 if __name__ == "__main__":
     main()
