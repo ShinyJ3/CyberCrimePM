@@ -1,14 +1,14 @@
 """
 predict.py
 
-Takes a new incident's characteristics and returns a Fast/Slow
-resolution prediction using the saved best model (models/model.pkl).
+Interactive command-line tool: asks the user to type in each incident
+feature one at a time, then returns a Fast/Slow resolution prediction
+with a confidence score, using the saved best model (models/model.pkl).
 
-Usage as a script (edit the example at the bottom, or wire up argparse
-later for a real CLI):
+Run from the project root (after preprocess.py and train.py):
     python src/predict.py
 
-Usage as a function from other code:
+This file can also be imported and used programmatically:
     from predict import predict
     label, confidence = predict(
         attack_type="Ransomware",
@@ -19,10 +19,11 @@ Usage as a function from other code:
         country="USA",
     )
 
-NOTE ON SOURCES: this file is mostly custom plumbing (matching a raw input
-to the one-hot encoded columns the model expects) rather than a technique
-pulled from an external tutorial, so there's nothing to cite here beyond
-scikit-learn's own predict_proba() API, which is standard library usage:
+NOTE ON SOURCES: this file is mostly custom plumbing (matching a typed
+input to the one-hot encoded columns the model expects, plus a plain
+input()-based CLI loop) rather than a technique pulled from an external
+tutorial, so there's nothing to cite here beyond scikit-learn's own
+predict_proba() API, which is standard library usage:
 https://scikit-learn.org/stable/glossary.html#term-predict_proba
 """
 
@@ -33,6 +34,17 @@ import joblib
 import pandas as pd
 
 MODELS_DIR = Path("models")
+
+# Human-readable prompt + the prefix used in the one-hot encoded columns
+# for that field (must match preprocess.py's FEATURE_COLUMNS order).
+FIELDS = [
+    ("attack_type", "Attack Type"),
+    ("target_industry", "Target Industry"),
+    ("security_vulnerability_type", "Security Vulnerability Type"),
+    ("defense_mechanism_used", "Defense Mechanism Used"),
+    ("attack_source", "Attack Source"),
+    ("country", "Country"),
+]
 
 
 # ---------------------------------------------------------
@@ -45,6 +57,23 @@ def load_artifacts():
     with open(MODELS_DIR / "feature_columns.json") as f:
         feature_columns = json.load(f)
     return model, label_encoder, feature_columns
+
+
+# ---------------------------------------------------------
+# FIGURE OUT VALID CATEGORIES PER FIELD
+#
+# feature_columns looks like ["attack_type_Ransomware",
+# "attack_type_Phishing", "target_industry_Healthcare", ...]. This pulls
+# out, for each field, the list of category values the model actually
+# saw during training - so we can show the user their options instead of
+# leaving them to guess exact spelling/capitalization.
+# ---------------------------------------------------------
+
+def get_known_categories(feature_columns, field_prefix):
+    prefix = f"{field_prefix}_"
+    return sorted(
+        col[len(prefix):] for col in feature_columns if col.startswith(prefix)
+    )
 
 
 # ---------------------------------------------------------
@@ -103,14 +132,56 @@ def predict(**kwargs):
     return predicted_label, confidence
 
 
+# ---------------------------------------------------------
+# INTERACTIVE CLI
+# ---------------------------------------------------------
+
+def prompt_for_value(prompt_label, known_categories):
+    """
+    Shows the user the valid categories for a field (so they don't have to
+    guess exact spelling), then asks them to type one. Keeps asking until
+    they enter something non-empty; if they type something unrecognized,
+    it warns them but still lets them proceed (build_input_row will treat
+    it as "none of the known categories" for that field).
+    """
+    print(f"\n{prompt_label}")
+    print("  Known values: " + ", ".join(known_categories))
+    while True:
+        value = input(f"  Enter {prompt_label}: ").strip()
+        if value:
+            return value
+        print("  Please type a value (can't be blank).")
+
+
+def run_interactive():
+    print("=" * 60)
+    print(" Cyberattack Resolution Predictor")
+    print(" Type in the incident's details below.")
+    print("=" * 60)
+
+    model, label_encoder, feature_columns = load_artifacts()
+
+    answers = {}
+    for field_name, prompt_label in FIELDS:
+        known_categories = get_known_categories(feature_columns, field_name)
+        answers[field_name] = prompt_for_value(prompt_label, known_categories)
+
+    input_row = build_input_row(feature_columns, **answers)
+
+    probabilities = model.predict_proba(input_row)[0]
+    predicted_index = probabilities.argmax()
+    predicted_label = label_encoder.inverse_transform([predicted_index])[0]
+    confidence = probabilities[predicted_index]
+
+    print("\n" + "-" * 60)
+    print(" YOUR INPUT")
+    for field_name, prompt_label in FIELDS:
+        print(f"   {prompt_label}: {answers[field_name]}")
+    print("-" * 60)
+    print(f" PREDICTED RESOLUTION: {predicted_label.upper()}")
+    print(f" CONFIDENCE:           {confidence:.1%}")
+    print("-" * 60)
+
+
 if __name__ == "__main__":
-    # Example prediction - swap these values to test different scenarios
-    label, confidence = predict(
-        attack_type="Ransomware",
-        target_industry="Healthcare",
-        security_vulnerability_type="Unpatched Software",
-        defense_mechanism_used="Firewall",
-        attack_source="Hacker Group",
-        country="USA",
-    )
-    print(f"Predicted resolution: {label} ({confidence:.1%} confidence)")
+    run_interactive()
