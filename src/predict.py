@@ -1,32 +1,14 @@
-"""
-predict.py
+# This file is used to make predictions using the trained model. 
+# It provides an interactive command-line interface (CLI), which is essentially for users to input details about a cyberattack incident 
+# and receive a prediction of whether the resolution time will be "Fast" or "Slow," along with the model's confidence in that prediction 
+# (which is the probability of the predicted class).
 
-Interactive command-line tool: asks the user to type in each incident
-feature one at a time, then returns a Fast/Slow resolution prediction
-with a confidence score, using the saved best model (models/model.pkl).
 
-Run from the project root (after preprocess.py and train.py):
-    python src/predict.py
+# For this file, I only used the source of the scikit-learn library for the predict_proba() method, so no additional libraries are needed,
+# and the link for this is https://scikit-learn.org/stable/glossary.html#term-predict_proba. This helped me how to do the predictions and along
+# with the knowledge from the Colab files of Python and the scikit-learn library, I was able to implement the predict.py file.
 
-This file can also be imported and used programmatically:
-    from predict import predict
-    label, confidence = predict(
-        attack_type="Ransomware",
-        target_industry="Healthcare",
-        security_vulnerability_type="Unpatched Software",
-        defense_mechanism_used="Firewall",
-        attack_source="Hacker Group",
-        country="USA",
-    )
-
-NOTE ON SOURCES: this file is mostly custom plumbing (matching a typed
-input to the one-hot encoded columns the model expects, plus a plain
-input()-based CLI loop) rather than a technique pulled from an external
-tutorial, so there's nothing to cite here beyond scikit-learn's own
-predict_proba() API, which is standard library usage:
-https://scikit-learn.org/stable/glossary.html#term-predict_proba
-"""
-
+# Libraries used for loading the model artifacts, handling data, and building the interactive CLI.
 import json
 from pathlib import Path
 
@@ -35,8 +17,7 @@ import pandas as pd
 
 MODELS_DIR = Path("models")
 
-# Human-readable prompt + the prefix used in the one-hot encoded columns
-# for that field (must match preprocess.py's FEATURE_COLUMNS order).
+# These are the fields that the user will be prompted to input values for, and they correspond to the features used in the model.
 FIELDS = [
     ("attack_type", "Attack Type"),
     ("target_industry", "Target Industry"),
@@ -47,10 +28,9 @@ FIELDS = [
 ]
 
 
-# ---------------------------------------------------------
-# LOADING
-# ---------------------------------------------------------
-
+# Similar to other files, functions are used for this file instead of notebooks and cells as it makes it easier on me to just call and
+# the artifacts function is used here to load the model, label encoder, and feature columns from the models directory. 
+# This is necessary for making predictions with the trained model.
 def load_artifacts():
     model = joblib.load(MODELS_DIR / "model.pkl")
     label_encoder = joblib.load(MODELS_DIR / "label_encoder.pkl")
@@ -58,36 +38,19 @@ def load_artifacts():
         feature_columns = json.load(f)
     return model, label_encoder, feature_columns
 
-
-# ---------------------------------------------------------
-# FIGURE OUT VALID CATEGORIES PER FIELD
-#
-# feature_columns looks like ["attack_type_Ransomware",
-# "attack_type_Phishing", "target_industry_Healthcare", ...]. This pulls
-# out, for each field, the list of category values the model actually
-# saw during training - so we can show the user their options instead of
-# leaving them to guess exact spelling/capitalization.
-# ---------------------------------------------------------
-
+# This function is used to get the known categories for a specific field based on the feature columns.
 def get_known_categories(feature_columns, field_prefix):
     prefix = f"{field_prefix}_"
     return sorted(
         col[len(prefix):] for col in feature_columns if col.startswith(prefix)
     )
 
-
-# ---------------------------------------------------------
-# BUILD A MATCHING INPUT ROW
-#
-# The trained model expects one-hot encoded columns like
-# "attack_type_Ransomware", "target_industry_Healthcare", etc.
-# This function builds a single row of all-zeros and flips on
-# the columns that match the given inputs.
-# ---------------------------------------------------------
-
+# This function is used to build a single-row DataFrame from the user-provided input values.
 def build_input_row(feature_columns, **kwargs) -> pd.DataFrame:
     row = {col: 0 for col in feature_columns}
 
+    # This for loop is neccessary because it iterates through the user-provided values for each field and 
+    # sets the corresponding dummy variable in the row to 1.
     for field_name, value in kwargs.items():
         dummy_col = f"{field_name}_{value}"
         if dummy_col in row:
@@ -99,51 +62,24 @@ def build_input_row(feature_columns, **kwargs) -> pd.DataFrame:
                 "categories' for that field, which may reduce accuracy."
             )
 
-    return pd.DataFrame([row])[feature_columns]  # enforce exact training column order
+    # This return statement creates a DataFrame with a single row, which is what the model expects for making predictions.
+    return pd.DataFrame([row])[feature_columns]  
 
-
-# ---------------------------------------------------------
-# PREDICT
-# ---------------------------------------------------------
-
+# This is the main function that takes user input for the features, builds the input row, 
+# and uses the trained model to make a prediction.
 def predict(**kwargs):
-    """
-    Expected keyword arguments (must match preprocess.py's FEATURE_COLUMNS):
-        attack_type
-        target_industry
-        security_vulnerability_type
-        defense_mechanism_used
-        attack_source
-        country
-    """
     model, label_encoder, feature_columns = load_artifacts()
     input_row = build_input_row(feature_columns, **kwargs)
-
-    # predict_proba returns the model's estimated probability for EACH class
-    # (e.g. [0.35, 0.65] = 35% Fast, 65% Slow). We take whichever class has
-    # the higher probability as the prediction, and report that probability
-    # as the "confidence" - it's the model's own estimate of how sure it is,
-    # not a guarantee of correctness.
     probabilities = model.predict_proba(input_row)[0]
     predicted_index = probabilities.argmax()
     predicted_label = label_encoder.inverse_transform([predicted_index])[0]
     confidence = probabilities[predicted_index]
-
+    # This return statement provides the predicted label and the confidence score, which can be used to inform the user about the prediction.
     return predicted_label, confidence
 
-
-# ---------------------------------------------------------
-# INTERACTIVE CLI
-# ---------------------------------------------------------
-
+# This is the main part of the whole CLI program, which runs the interactive prompt for the user to input values for each field, 
+# and then it calls the predict function to get the prediction and confidence score.
 def prompt_for_value(prompt_label, known_categories):
-    """
-    Shows the user the valid categories for a field (so they don't have to
-    guess exact spelling), then asks them to type one. Keeps asking until
-    they enter something non-empty; if they type something unrecognized,
-    it warns them but still lets them proceed (build_input_row will treat
-    it as "none of the known categories" for that field).
-    """
     print(f"\n{prompt_label}")
     print("  Known values: " + ", ".join(known_categories))
     while True:
@@ -152,27 +88,35 @@ def prompt_for_value(prompt_label, known_categories):
             return value
         print("  Please type a value (can't be blank).")
 
-
+# This allows for an interface in the terminal to look somewhat appealing, and this is what a frontend of the project with a webstie
+# would look like, but this is a CLI version of the project and it is not a web application.
 def run_interactive():
     print("=" * 60)
     print(" Cyberattack Resolution Predictor")
     print(" Type in the incident's details below.")
     print("=" * 60)
 
+    # This line loads the model, label encoder, and feature columns from the models directory, which are necessary for making predictions.
     model, label_encoder, feature_columns = load_artifacts()
 
     answers = {}
+
+    # The for loop iterates through each field defined in FIELDS, 
+    # prompting the user for input and storing the responses in the answers dictionary.
     for field_name, prompt_label in FIELDS:
         known_categories = get_known_categories(feature_columns, field_name)
         answers[field_name] = prompt_for_value(prompt_label, known_categories)
 
     input_row = build_input_row(feature_columns, **answers)
 
+    # This section uses the model to predict the probabilities for each possible resolution based on the input row. 
+    # It then determines the predicted label and the confidence score.
     probabilities = model.predict_proba(input_row)[0]
     predicted_index = probabilities.argmax()
     predicted_label = label_encoder.inverse_transform([predicted_index])[0]
     confidence = probabilities[predicted_index]
 
+    # This section prints out the user's input, the predicted resolution, and the confidence score in a formatted manner.
     print("\n" + "-" * 60)
     print(" YOUR INPUT")
     for field_name, prompt_label in FIELDS:
@@ -182,6 +126,6 @@ def run_interactive():
     print(f" CONFIDENCE:           {confidence:.1%}")
     print("-" * 60)
 
-
+# This allows the entire file to be run with one function call, allowing for encapsulation of the CLI program.
 if __name__ == "__main__":
     run_interactive()
