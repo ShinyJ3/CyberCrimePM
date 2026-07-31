@@ -1,34 +1,12 @@
-"""
-evaluate.py
+# This file is used to evaluate the performance of the trained model on the test set. 
+# It loads the test data, the trained model, and the necessary artifacts, and then computes various evaluation metrics such as 
+# accuracy, precision, recall, F1 score, and confusion matrix. It also generates a plot of feature importances if applicable.
 
-Evaluates the best saved model (models/model.pkl) against the held-out
-test set produced by train.py.
+# All sources used for are embedded within comments in the code, 
+# especially for XGBoost explanation and the tuning of the hyperparameters, 
+# and the evaluation metrics. 
 
-Produces:
-    - Printed accuracy / precision / recall / F1 / classification report
-      (each explained in plain English below, not just printed as raw numbers)
-    - outputs/figures/confusion_matrix.png
-    - outputs/figures/feature_importance.png (only for tree-based models)
-
-===========================================================================
-SOURCES USED IN THIS FILE:
-- Confusion matrix concept (TP/TN/FP/FN):
-  https://www.geeksforgeeks.org/machine-learning/confusion-matrix-machine-learning/
-  https://www.geeksforgeeks.org/machine-learning/essential-metrics-for-model-assessment-tp-tn-fp-fn-in-machine-learning/
-- Precision / Recall / Accuracy definitions:
-  https://www.geeksforgeeks.org/machine-learning/sklearn-classification-metrics/
-- F1 score definition and formula:
-  https://www.geeksforgeeks.org/machine-learning/f1-score-in-machine-learning/
-- classification_report() output format (per-class precision/recall/f1/support,
-  plus macro avg / weighted avg):
-  https://www.geeksforgeeks.org/machine-learning/compute-classification-report-and-confusion-matrix-in-python/
-  https://scikit-learn.org/stable/modules/generated/sklearn.metrics.classification_report.html
-===========================================================================
-
-Run from the project root (after train.py):
-    python src/evaluate.py
-"""
-
+# The libraries are used for data manipulation, model loading, evaluation metrics, and visualization.
 import json
 from pathlib import Path
 
@@ -45,31 +23,32 @@ from sklearn.metrics import (
     recall_score,
 )
 
-# ---------------------------------------------------------
-# CONFIG
-# ---------------------------------------------------------
 
+# These are the same constants as in train.py, and these will be used for loading the test split and the saved model artifacts.
 MODELS_DIR = Path("models")
 TEST_SPLIT_PATH = Path("data/processed/test_split.csv")
 FIGURES_DIR = Path("outputs/figures")
 TARGET_COLUMN = "resolution_class"
 
 
-# ---------------------------------------------------------
-# LOADING
-# ---------------------------------------------------------
-
+# This method is used to load the test data from the CSV file produced by train.py. 
+# It raises a FileNotFoundError if the test split file does not exist, prompting the user to run train.py first. 
+# The method returns the features (X_test) and labels (y_test) for evaluation.
 def load_test_data():
     if not TEST_SPLIT_PATH.exists():
         raise FileNotFoundError(
             f"Couldn't find {TEST_SPLIT_PATH}. Run `python src/train.py` first."
         )
     df = pd.read_csv(TEST_SPLIT_PATH)
+    # These lines separate the features and labels from the test DataFrame. 
+    # The features are all columns except the target column, while the labels are in the target column.
     X_test = df.drop(columns=[TARGET_COLUMN])
     y_test = df[TARGET_COLUMN]
     return X_test, y_test
 
-
+# This method is used to load the models and artifacts from the previously trained code in order to evaluate them on the test set. 
+# It loads the model, label encoder, and feature columns from the specified paths in the models directory. 
+# The method returns the loaded model, label encoder, and feature columns for use in evaluation.
 def load_artifacts():
     model = joblib.load(MODELS_DIR / "model.pkl")
     label_encoder = joblib.load(MODELS_DIR / "label_encoder.pkl")
@@ -77,49 +56,27 @@ def load_artifacts():
         feature_columns = json.load(f)
     return model, label_encoder, feature_columns
 
-
-# ---------------------------------------------------------
-# METRICS
-# ---------------------------------------------------------
-
+# This function prints out the evaluation metrics for the model's predictions on the test set.
 def print_metrics(y_test, preds, label_encoder):
-    """
-    Prints the four headline metrics, each with a plain-English explanation,
-    plus the full per-class classification report.
+    # In order to research further about the metrics, I used the following sources to understand the metrics and their definitions, 
+    # which are included in the docstring below.
+    
+    # Accuracy is the overall fraction of correct predictions
+    # Source: https://www.geeksforgeeks.org/machine-learning/sklearn-classification-metrics/
+    
+    # Precision is the fraction of predicted "Slow" incidents that were actually Slow
+    # Source: https://www.geeksforgeeks.org/machine-learning/sklearn-classification-metrics/
+    
+    # Recall is the fraction of actual "Slow" incidents that were correctly predicted as Slow
+    # Source: https://www.geeksforgeeks.org/machine-learning/sklearn-classification-metrics/
+    
+    # F1 Score is the harmonic mean of Precision and Recall.
+    # Source: https://www.geeksforgeeks.org/machine-learning/f1-score-in-machine-learning/
 
-    What each metric means (treating "Slow" as the positive class here,
-    since that's usually the more actionable thing to catch early):
-
-    ACCURACY - out of every prediction the model made, what fraction were
-    correct overall (Fast predicted as Fast, AND Slow predicted as Slow).
-    Simple to understand, but can be misleading if one class is much more
-    common than the other (a model that always guesses the majority class
-    can still score a high accuracy without actually learning anything).
-    Source: https://www.geeksforgeeks.org/machine-learning/sklearn-classification-metrics/
-
-    PRECISION - out of every incident the model predicted would be "Slow",
-    what fraction actually were Slow. Low precision means the model cries
-    wolf a lot (flags a lot of incidents as Slow that are really Fast).
-    Source: https://www.geeksforgeeks.org/machine-learning/sklearn-classification-metrics/
-
-    RECALL - out of every incident that was ACTUALLY Slow, what fraction did
-    the model correctly catch. Low recall means the model misses a lot of
-    genuinely slow incidents, incorrectly calling them Fast.
-    Source: https://www.geeksforgeeks.org/machine-learning/sklearn-classification-metrics/
-
-    F1 SCORE - the harmonic mean of precision and recall, giving a single
-    number that only stays high when BOTH precision and recall are high
-    (unlike a plain average, it drops sharply if either one is low). This
-    is why we picked the "best model" by F1 in train.py instead of accuracy.
-    Source: https://www.geeksforgeeks.org/machine-learning/f1-score-in-machine-learning/
-
-    CLASSIFICATION REPORT - breaks precision/recall/f1 down separately for
-    EACH class (Fast and Slow), plus "support" (how many real examples of
-    that class were in the test set), and macro/weighted averages across
-    classes. Useful for spotting if the model is much better at predicting
-    one class than the other.
-    Source: https://www.geeksforgeeks.org/machine-learning/compute-classification-report-and-confusion-matrix-in-python/
-    """
+    # I also utilized the classification_report() method from scikit-learn to get a detailed breakdown of precision, recall, 
+    # and F1 score for each class (Fast and Slow), and the source for this is 
+    # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.classification_report.html.
+ 
     acc = accuracy_score(y_test, preds)
     prec = precision_score(y_test, preds)
     rec = recall_score(y_test, preds)
@@ -132,20 +89,10 @@ def print_metrics(y_test, preds, label_encoder):
     print("\nFull classification report (per-class breakdown):")
     print(classification_report(y_test, preds, target_names=label_encoder.classes_))
 
-
+# This is where the confusion matrix that is used in my slide is established, which is a grid comparing predicted vs. actual classes.
+# I also learnt about True Positive, True Negative, False Positive, and False Negative from the following sources:
+# https://www.geeksforgeeks.org/machine-learning/confusion-matrix-machine-learning/
 def plot_confusion_matrix(y_test, preds, label_encoder):
-    """
-    The confusion matrix is a grid comparing predicted vs. actual classes.
-    For our binary Fast/Slow case, the four cells are:
-        True Negative  (top-left):     actual Fast,  predicted Fast  (correct)
-        False Positive (top-right):    actual Fast,  predicted Slow  (wrong)
-        False Negative (bottom-left):  actual Slow,  predicted Fast  (wrong)
-        True Positive  (bottom-right): actual Slow,  predicted Slow  (correct)
-    This is more informative than a single accuracy number because it shows
-    WHICH kind of mistake the model tends to make, not just how often it's
-    wrong overall.
-    Source: https://www.geeksforgeeks.org/machine-learning/confusion-matrix-machine-learning/
-    """
     cm = confusion_matrix(y_test, preds)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -158,27 +105,12 @@ def plot_confusion_matrix(y_test, preds, label_encoder):
         xticklabels=label_encoder.classes_,
         yticklabels=label_encoder.classes_,
     )
-    plt.xlabel("Predicted")
-    plt.ylabel("Actual")
-    plt.title("Confusion Matrix")
-    plt.tight_layout()
-    out_path = FIGURES_DIR / "confusion_matrix.png"
-    plt.savefig(out_path)
-    plt.close()
-    print(f"\nSaved confusion matrix to {out_path}")
 
-
+# Although this was not mentioned in the presentation, in order to get the models to know the importance of each feature, 
+# I used the feature_importances_ attribute of tree-based models to get the importance of each feature in making predictions.
+# I also used the following source to understand how to plot the feature importance
+# Source: https://www.geeksforgeeks.org/machine-learning/hyperparameters-of-random-forest-classifier/.
 def plot_feature_importance(model, feature_columns, top_n=15):
-    """
-    Tree-based models (Random Forest, XGBoost) can report how much each
-    input feature contributed to reducing prediction error across all the
-    trees. Higher importance = the model relied on that feature more often
-    when deciding how to split the data. This is the chart that answers
-    the project's core question: which defense mechanisms/attack types/etc.
-    actually mattered most to the model's Fast/Slow predictions.
-    Source: https://www.geeksforgeeks.org/machine-learning/hyperparameters-of-random-forest-classifier/
-    (general concept of tree-based feature importance referenced there)
-    """
     if not hasattr(model, "feature_importances_"):
         print(
             f"{type(model).__name__} does not expose feature_importances_ "
@@ -189,6 +121,8 @@ def plot_feature_importance(model, feature_columns, top_n=15):
     importances = pd.Series(model.feature_importances_, index=feature_columns)
     top_features = importances.sort_values(ascending=False).head(top_n)
 
+    # This section creates a bar plot of the top N feature importances, saves it to the figures directory, 
+    # and prints the path to the saved plot.
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     plt.figure(figsize=(8, 6))
     sns.barplot(x=top_features.values, y=top_features.index, orient="h")
@@ -200,11 +134,7 @@ def plot_feature_importance(model, feature_columns, top_n=15):
     plt.close()
     print(f"Saved feature importance plot to {out_path}")
 
-
-# ---------------------------------------------------------
-# MAIN
-# ---------------------------------------------------------
-
+# Again, like with the other files, this is the main function that is called when the script is run from the command line.
 def main():
     X_test, y_test = load_test_data()
     model, label_encoder, feature_columns = load_artifacts()
@@ -217,6 +147,7 @@ def main():
     plot_confusion_matrix(y_test, preds, label_encoder)
     plot_feature_importance(model, feature_columns)
 
-
+# And again, this is the main function that is called when the script is run from the command line.
 if __name__ == "__main__":
     main()
+
